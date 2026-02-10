@@ -36,80 +36,80 @@ export const getStudentQuizById = async (req, res) => {
 
 
 export const submitQuiz = async (req, res) => {
-  const { quizId, timeSpent, answers } = req.body;
-  const studentId = req.user.userId;
+    const { quizId, timeSpent, answers } = req.body;
+    const studentId = req.user.userId;
 
-  if (!quizId || !Array.isArray(answers)) {
-    return res.status(400).json({ error: 'Invalid input data' });
-  }
-
-  try {
-    const existingResult = await Result.findOne({ quiz: quizId, student: studentId });
-    if (existingResult) {
-      return res.status(400).json({ error: 'Quiz already submitted' });
+    if (!quizId || !Array.isArray(answers)) {
+        return res.status(400).json({ error: 'Invalid input data' });
     }
 
-    // Fetch quiz to verify answers
-    const quiz = await Quiz.findById(quizId);
-    if (!quiz || !quiz.questions) {
-      return res.status(404).json({ error: 'Quiz not found or has no questions' });
-    }
-
-    let correct = 0;
-    answers.forEach(({ questionIndex, selectedOption }) => {
-      if (
-        quiz.questions[questionIndex] &&
-        quiz.questions[questionIndex]?.correctAnswer === selectedOption
-      ) {
-        correct += 1;
+    try {
+      const existingResult = await Result.findOne({ quiz: quizId, student: studentId });
+      if (existingResult) {
+        return res.status(400).json({ error: 'Quiz already submitted' });
       }
-    });
 
-    const score = Math.round((correct / quiz.questions.length) * 100);
+      // Fetch quiz to verify answers
+      const quiz = await Quiz.findById(quizId);
+      if (!quiz || !quiz.questions) {
+        return res.status(404).json({ error: 'Quiz not found or has no questions' });
+      }
 
-    const result = await Result.create({
-      quiz: quizId,
-      student: studentId,
-      score,
-      correctAnswers: correct,
-      timeSpent,
-      answers,
-    });
+      let correct = 0;
+      answers.forEach(({ questionIndex, selectedOption }) => {
+        if (
+          quiz.questions[questionIndex] &&
+          quiz.questions[questionIndex]?.correctAnswer === selectedOption
+        ) {
+          correct += 1;
+        }
+      });
 
-    // Update quiz average score
-    const allResults = await Result.find({ quiz: quizId });
-    const newAvg = Math.round(
-      allResults.reduce((sum, r) => sum + r.score, 0) / allResults.length
-    );
-    quiz.avgScore = newAvg;
-    await quiz.save();
+      const score = Math.round((correct / quiz.questions.length) * 100);
 
-     // Invalidate Redis cache for this student's results
-    const cacheKey = `studentResults:${studentId}`;
-    await client.del(cacheKey);
+      const result = await Result.create({
+        quiz: quizId,
+        student: studentId,
+        score,
+        correctAnswers: correct,
+        timeSpent,
+        answers,
+      });
 
-    // // Invalidate the cached active quizzes for this student
-    // const QuizecacheKey = `activeQuizzes:${studentId}`;
-    // await client.del(QuizecacheKey);
-    // console.log(`Redis cache invalidated for student ${studentId}`);
+      // Update quiz average score
+      const allResults = await Result.find({ quiz: quizId });
+      const newAvg = Math.round(
+        allResults.reduce((sum, r) => sum + r.score, 0) / allResults.length
+      );
+      quiz.avgScore = newAvg;
+      await quiz.save();
 
-    // const quiz = await Quiz.findById(quizId);
-    if (quiz) {
-      const cacheKey = `student:${studentId}:batch:${quiz.batch}:quizzes`;
-      await client.del(cacheKey); // Delete the cached quizzes for this batch
-      console.log(`Redis cache cleared for student ${studentId}, batch ${quiz.batch}`);
+      // Invalidate Redis cache for this student's results
+      const cacheKey = `studentResults:${studentId}`;
+      await client.del(cacheKey);
+
+      // // Invalidate the cached active quizzes for this student
+      // const QuizecacheKey = `activeQuizzes:${studentId}`;
+      // await client.del(QuizecacheKey);
+      // console.log(`Redis cache invalidated for student ${studentId}`);
+
+      // const quiz = await Quiz.findById(quizId);
+      if (quiz) {
+        const cacheKey = `student:${studentId}:batch:${quiz.batch}:quizzes`;
+        await client.del(cacheKey); // Delete the cached quizzes for this batch
+        console.log(`Redis cache cleared for student ${studentId}, batch ${quiz.batch}`);
+      }
+
+      const teacherId = quiz.createdBy._id;
+      await client.del(`leaderboard:${teacherId}:*`);
+      console.log(`Redis cache for leaderboard invalidated after quiz submission`);
+
+      res.status(201).json({ message: 'Quiz submitted successfully', result });
+
+    } catch (error) {
+      console.error('Quiz submission failed:', error.message);
+      res.status(500).json({ error: 'Quiz submission failed' });
     }
-
-    const teacherId = quiz.createdBy._id;
-    await client.del(`leaderboard:${teacherId}:*`);
-    console.log(`Redis cache for leaderboard invalidated after quiz submission`);
-
-    res.status(201).json({ message: 'Quiz submitted successfully', result });
-
-  } catch (error) {
-    console.error('Quiz submission failed:', error.message);
-    res.status(500).json({ error: 'Quiz submission failed' });
-  }
 };
 
 
